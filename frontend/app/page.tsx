@@ -57,7 +57,7 @@ export default function Dashboard() {
     }
 
     try {
-      const response = await fetch("http://localhost:3001/api/vessels", {
+      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/vessels", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) setVessels(await response.json());
@@ -77,7 +77,7 @@ export default function Dashboard() {
     setSubmitting(true);
     const token = localStorage.getItem("kairos_token");
     try {
-      const res = await fetch("http://localhost:3001/api/vessels", {
+      const res = await fetch("https://kairos-maritime-backend.onrender.com/api/vessels", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -107,7 +107,7 @@ export default function Dashboard() {
       return;
     const token = localStorage.getItem("kairos_token");
     try {
-      const res = await fetch(`http://localhost:3001/api/vessels/${id}`, {
+      const res = await fetch(`https://kairos-maritime-backend.onrender.com/api/vessels/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -124,7 +124,7 @@ export default function Dashboard() {
     const token = localStorage.getItem("kairos_token");
 
     try {
-      const res = await fetch("http://localhost:3001/api/users", {
+      const res = await fetch("https://kairos-maritime-backend.onrender.com/api/users", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

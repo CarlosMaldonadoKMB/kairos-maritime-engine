@@ -15,7 +15,7 @@ export default function OnboardingPanel() {
     setStatusMsg(null);
 
     try {
-      const response = await fetch("http://localhost:3001/api/onboarding", {
+      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -39,7 +39,7 @@ export default function VesselDetail() {
     if (!token) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/vessels/${params.id}/certificates`, {
+      const response = await fetch(`https://kairos-maritime-backend.onrender.com/api/vessels/${params.id}/certificates`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
@@ -90,7 +90,7 @@ export default function VesselDetail() {
     formData.append("file", archivo);
 
     try {
-      const response = await fetch("http://localhost:3001/api/certificates", {
+      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/certificates", {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` },
         body: formData 
@@ -118,7 +118,7 @@ export default function VesselDetail() {
     if (!confirm("¿Deseas enviar una solicitud de inspección oficial a la Autoridad Marítima?")) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/certificates/${certId}/renew`, {
+      const response = await fetch(`https://kairos-maritime-backend.onrender.com/api/certificates/${certId}/renew`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
