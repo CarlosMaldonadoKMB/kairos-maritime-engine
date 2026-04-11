@@ -3,6 +3,8 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 require('dotenv').config();
 const { calculateStatus } = require('./motor');
 
@@ -373,6 +375,33 @@ async function alinearTenant() {
 }
 
 alinearTenant();
+
+// ==========================================
+// RUTA DE PRUEBA: DISPARADOR DE CORREO
+// ==========================================
+app.get('/api/test-email', async (req, res) => {
+  try {
+    const data = await resend.emails.send({
+      from: 'Kairos Maritime <onboarding@resend.dev>', // Dominio de prueba de Resend
+      to: 'TU_CORREO_REAL@gmail.com', // ⚠️ CAMBIA ESTO por el correo con el que te registraste en Resend
+      subject: '⚓ Alerta de Flota: Kairos Maritime',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
+          <h2 style="color: #1e3a8a;">Kairos Maritime - Reporte de Estado</h2>
+          <p>Estimado Gerente,</p>
+          <p>Esta es una alerta de prueba. El sistema de comunicaciones de su flota está <strong>100% operativo</strong>.</p>
+          <br/>
+          <p>Atentamente,<br/><strong>El Motor de Kairos</strong></p>
+        </div>
+      `
+    });
+
+    res.json({ message: '¡Correo disparado con éxito!', id: data.id });
+  } catch (error) {
+    console.error('Error al enviar correo:', error);
+    res.status(500).json({ error: 'Fallo en la sala de comunicaciones' });
+  }
+});
 
 app.listen(3001, () => {
   console.log('🚀 Kairos Backend navegando en puerto 3001 (Conectado a AWS S3)');
