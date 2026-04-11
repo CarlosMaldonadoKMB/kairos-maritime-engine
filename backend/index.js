@@ -377,29 +377,33 @@ async function alinearTenant() {
 alinearTenant();
 
 // ==========================================
-// RUTA DE PRUEBA: DISPARADOR DE CORREO
+// RUTA DE PRUEBA: DISPARADOR DE CORREO (V2)
 // ==========================================
 app.get('/api/test-email', async (req, res) => {
   try {
-    const data = await resend.emails.send({
-      from: 'Kairos Maritime <onboarding@resend.dev>', // Dominio de prueba de Resend
-      to: 'TU_CORREO_REAL@gmail.com', // ⚠️ CAMBIA ESTO por el correo con el que te registraste en Resend
+    const { data, error } = await resend.emails.send({
+      from: 'Acme <onboarding@resend.dev>',
+      to: 'TU_CORREO_REGISTRADO_EN_RESEND@gmail.com', // ⚠️ TU CORREO AQUÍ
       subject: '⚓ Alerta de Flota: Kairos Maritime',
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
           <h2 style="color: #1e3a8a;">Kairos Maritime - Reporte de Estado</h2>
           <p>Estimado Gerente,</p>
           <p>Esta es una alerta de prueba. El sistema de comunicaciones de su flota está <strong>100% operativo</strong>.</p>
-          <br/>
-          <p>Atentamente,<br/><strong>El Motor de Kairos</strong></p>
         </div>
       `
     });
 
-    res.json({ message: '¡Correo disparado con éxito!', id: data.id });
-  } catch (error) {
-    console.error('Error al enviar correo:', error);
-    res.status(500).json({ error: 'Fallo en la sala de comunicaciones' });
+    // Si Resend devuelve un error interno, lo atrapamos aquí:
+    if (error) {
+      console.error('Error devuelto por Resend:', error);
+      return res.status(400).json({ mensaje: 'El cartero falló', detalles: error });
+    }
+
+    res.json({ message: '¡Correo disparado con éxito y confirmado por Resend!', data });
+  } catch (err) {
+    console.error('Error crítico del servidor:', err);
+    res.status(500).json({ mensaje: 'Fallo total en la sala de comunicaciones', error: err.message });
   }
 });
 
