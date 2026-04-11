@@ -383,7 +383,7 @@ app.get('/api/test-email', async (req, res) => {
   try {
     const { data, error } = await resend.emails.send({
       from: 'Acme <onboarding@resend.dev>',
-      to: 'TU_CORREO_REGISTRADO_EN_RESEND@gmail.com', // ⚠️ TU CORREO AQUÍ
+      to: 'carlos.maldonado@kairosmb.org', // ⚠️ TU CORREO AQUÍ
       subject: '⚓ Alerta de Flota: Kairos Maritime',
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
