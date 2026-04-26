@@ -421,7 +421,7 @@ cron.schedule('*/2 * * * *', async () => {
     // Disparo de prueba automatizado
     const { data, error } = await resend.emails.send({
       from: 'Acme <onboarding@resend.dev>',
-      to: 'health.7tcahtkejgt@gmail.com', // <-- ⚠️ TU CORREO AQUÍ
+      to: 'carlos.maldonado@kairosmb.org', // <-- ⚠️ TU CORREO AQUÍ
       subject: '🤖 Ping Automático: Kairos Maritime',
       html: '<p>¡El piloto automático está vivo! Este correo se disparó sin intervención humana.</p>'
     });
