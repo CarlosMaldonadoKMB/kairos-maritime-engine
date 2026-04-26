@@ -409,32 +409,72 @@ app.get('/api/test-email', async (req, res) => {
 });
 
 // ==========================================
-// ⏰ PILOTO AUTOMÁTICO (CRON JOB)
+// ⏰ PILOTO AUTOMÁTICO INTELIGENTE (CRON JOB)
 // ==========================================
-// La expresión '*/2 * * * *' significa: "Ejecutar cada 2 minutos"
-// Más adelante lo cambiaremos a '0 8 * * *' (Todos los días a las 08:00 AM)
-
-cron.schedule('*/2 * * * *', async () => {
-  console.log('⏰ [Radar Automático] El reloj interno ha despertado. Iniciando escaneo...');
-
+// Se ejecuta todos los días a las 08:00 AM (Hora de Chile)
+cron.schedule('0 8 * * *', async () => {
+  console.log('⏰ [Radar Automático] Iniciando escaneo matutino de la flota...');
+  
   try {
-    // Disparo de prueba automatizado
+    // 1. Buscar certificados que vencen en 30 días o menos (o que ya vencieron)
+    const result = await pool.query(`
+      SELECT 
+        c.name AS cert_name, 
+        c.expiration_date, 
+        v.name AS vessel_name 
+      FROM certificates c
+      JOIN vessels v ON c.vessel_id = v.id
+      WHERE c.expiration_date <= CURRENT_DATE + INTERVAL '30 days'
+    `);
+
+    const expiringCerts = result.rows;
+
+    // Si no hay vencimientos, el sistema sigue durmiendo tranquilamente
+    if (expiringCerts.length === 0) {
+      console.log('✅ [Cron] Flota en regla. No hay vencimientos próximos hoy.');
+      return;
+    }
+
+    // 2. Construir el reporte en HTML
+    let htmlRows = expiringCerts.map(cert => {
+      // Formateamos la fecha para que se lea fácil en Chile (DD-MM-YYYY)
+      const fechaFormat = new Date(cert.expiration_date).toLocaleDateString('es-CL');
+      return `<li style="margin-bottom: 10px;">🚢 <b>${cert.vessel_name}</b>: ${cert.cert_name} <span style="color: #d97706;">(Vence/Venció: ${fechaFormat})</span></li>`;
+    }).join('');
+
+    const emailHtml = `
+      <div style="font-family: sans-serif; color: #333;">
+        <h2 style="color: #1e293b;">Kairos Maritime - Reporte de Estado</h2>
+        <p>Estimado Gerente,</p>
+        <p>El sistema automático ha detectado los siguientes documentos que requieren su atención:</p>
+        <ul style="background-color: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          ${htmlRows}
+        </ul>
+        <p>Por favor, ingrese a su panel de control para gestionar la renovación.</p>
+        <p>Atentamente,<br><b>Su Sistema Kairos</b></p>
+      </div>
+    `;
+
+    // 3. Disparar el correo de alerta
     const { data, error } = await resend.emails.send({
-      from: 'Acme <onboarding@resend.dev>',
-      to: 'carlos.maldonado@kairosmb.org', // <-- ⚠️ TU CORREO AQUÍ
-      subject: '🤖 Ping Automático: Kairos Maritime',
-      html: '<p>¡El piloto automático está vivo! Este correo se disparó sin intervención humana.</p>'
+      from: 'Acme <onboarding@resend.dev>', // Mantendremos este hasta verificar el dominio
+      to: 'carlos.maldonado@kairosmb.org', // Correo de prueba
+      subject: '⚠️ Alerta de Vencimientos - Kairos Maritime',
+      html: emailHtml
     });
 
     if (error) {
-      console.error('❌ [Cron] El cartero automático falló:', error);
+      console.error('❌ [Cron] Error al enviar reporte:', error);
     } else {
-      console.log('✅ [Cron] Correo automático enviado con éxito. ID:', data?.id);
+      console.log(`✅ [Cron] Reporte enviado con éxito (${expiringCerts.length} alertas). ID:`, data?.id);
     }
 
   } catch (err) {
-    console.error('❌ [Cron] Falla crítica en el motor de tiempo:', err);
+    console.error('❌ [Cron] Falla crítica en el escaneo de base de datos:', err);
   }
+}, {
+  scheduled: true,
+  timezone: "America/Santiago" // <-- El truco maestro para la hora exacta
 });
 
 app.listen(3001, () => {
