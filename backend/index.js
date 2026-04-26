@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
+const cron = require('node-cron');
 require('dotenv').config();
 const { calculateStatus } = require('./motor');
 
@@ -404,6 +405,35 @@ app.get('/api/test-email', async (req, res) => {
   } catch (err) {
     console.error('Error crítico del servidor:', err);
     res.status(500).json({ mensaje: 'Fallo total en la sala de comunicaciones', error: err.message });
+  }
+});
+
+// ==========================================
+// ⏰ PILOTO AUTOMÁTICO (CRON JOB)
+// ==========================================
+// La expresión '*/2 * * * *' significa: "Ejecutar cada 2 minutos"
+// Más adelante lo cambiaremos a '0 8 * * *' (Todos los días a las 08:00 AM)
+
+cron.schedule('*/2 * * * *', async () => {
+  console.log('⏰ [Radar Automático] El reloj interno ha despertado. Iniciando escaneo...');
+
+  try {
+    // Disparo de prueba automatizado
+    const { data, error } = await resend.emails.send({
+      from: 'Acme <onboarding@resend.dev>',
+      to: 'health.7tcahtkejgt@gmail.com', // <-- ⚠️ TU CORREO AQUÍ
+      subject: '🤖 Ping Automático: Kairos Maritime',
+      html: '<p>¡El piloto automático está vivo! Este correo se disparó sin intervención humana.</p>'
+    });
+
+    if (error) {
+      console.error('❌ [Cron] El cartero automático falló:', error);
+    } else {
+      console.log('✅ [Cron] Correo automático enviado con éxito. ID:', data?.id);
+    }
+
+  } catch (err) {
+    console.error('❌ [Cron] Falla crítica en el motor de tiempo:', err);
   }
 });
 
