@@ -35,9 +35,6 @@ const s3 = new S3Client({
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ==========================================
-// 1. CONFIGURACIÓN DE BASE DE DATOS
-// ==========================================
-// ==========================================
 // 1. CONFIGURACIÓN DE BASE DE DATOS (NUBE)
 // ==========================================
 const pool = new Pool({
@@ -81,34 +78,65 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  // Buscamos al usuario incluyendo su nave asignada
   const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
   if (user.rows.length === 0) return res.status(401).send('Usuario no encontrado');
 
   const validPass = await bcrypt.compare(password, user.rows[0].password_hash);
   if (!validPass) return res.status(401).send('Contraseña incorrecta');
 
-  // EL TOKEN AHORA LLEVA EL ROL Y LA NAVE ASIGNADA
   const token = jwt.sign({ 
     id: user.rows[0].id, 
     tenant_id: user.rows[0].tenant_id, 
     role: user.rows[0].role,
-    assigned_vessel_id: user.rows[0].assigned_vessel_id // <--- LA LLAVE MAESTRA
+    assigned_vessel_id: user.rows[0].assigned_vessel_id
   }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
   res.json({ token });
 });
 
 // ==========================================
+// 📱 RUTA DE LA APP MÓVIL (Recepción de Fotos)
+// ==========================================
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se recibió ningún archivo' });
+    }
+
+    console.log('📸 Foto recibida desde el celular. Subiendo a AWS S3...');
+
+    const fileName = `certificados/${Date.now()}-${req.file.originalname}`;
+    
+    const uploadParams = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: fileName,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+    };
+
+    await s3.send(new PutObjectCommand(uploadParams));
+
+    console.log('✅ Foto asegurada en S3:', fileName);
+
+    res.json({ 
+      success: true, 
+      message: 'Archivo subido con éxito',
+      url: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.amazonaws.com/${fileName}`
+    });
+
+  } catch (error) {
+    console.error('❌ Error crítico en la subida:', error);
+    res.status(500).json({ error: 'Falla interna en el servidor' });
+  }
+});
+
+// ==========================================
 // 4. RUTAS PROTEGIDAS
 // ==========================================
-// OBTENER FLOTA CON RESUMEN DE SALUD (Semáforo incluido)
 app.get('/api/vessels', verifyToken, async (req, res) => {
   try {
-    // 🔍 MICROFONO OCULTO (RAYO X) PARA DEBUG
     console.log("🔍 DATOS DEL TOKEN LEYENDO EL RADAR:", req.user);
 
-    // Base de la consulta
     let query = `
       SELECT v.*,
         COUNT(CASE WHEN c.status LIKE '%🟢%' THEN 1 END) as count_vigente,
@@ -122,7 +150,6 @@ app.get('/api/vessels', verifyToken, async (req, res) => {
     `;
     const params = [req.user.tenant_id];
 
-    // FILTRO TÁCTICO: Si es capitán, solo ve su nave asignada
     if (req.user.role === 'capitan' && req.user.assigned_vessel_id) {
       query += ` AND v.id = $2 `;
       params.push(req.user.assigned_vessel_id);
@@ -135,12 +162,9 @@ app.get('/api/vessels', verifyToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// REGISTRAR NUEVA NAVE (Astillero Digital)
 app.post('/api/vessels', verifyToken, async (req, res) => {
   const { name, registration_number } = req.body;
-  
   try {
-    // Insertamos la nave vinculándola automáticamente al tenant_id del usuario
     const result = await pool.query(
       'INSERT INTO vessels (tenant_id, name, registration_number) VALUES ($1, $2, $3) RETURNING *',
       [req.user.tenant_id, name, registration_number]
@@ -151,12 +175,7 @@ app.post('/api/vessels', verifyToken, async (req, res) => {
   }
 });
 
-// ==========================================
-// NUEVA RUTA: Crear Usuario de Tripulación (por el Admin)
-// Debe insertarse justo aquí, debajo de las anteriores rutas protegidas:
-
 app.post('/api/users', verifyToken, async (req, res) => {
-  // Solo admins pueden crear usuarios
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: "Acceso denegado. Solo administradores" });
   }
@@ -168,17 +187,13 @@ app.post('/api/users', verifyToken, async (req, res) => {
   }
 
   try {
-    // Encriptar el password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Insertar usuario con el mismo tenant_id del admin
     const result = await pool.query(
       'INSERT INTO users (email, password_hash, role, tenant_id, assigned_vessel_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, role, assigned_vessel_id',
       [email, hashedPassword, role, req.user.tenant_id, assigned_vessel_id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    // Detección por unique_violation (correo ya existe)
     if (err.code === '23505' && err.constraint && err.constraint.includes('users_email_key')) {
       return res.status(400).json({ error: "El correo ya está registrado" });
     }
@@ -186,9 +201,6 @@ app.post('/api/users', verifyToken, async (req, res) => {
   }
 });
 
-// ------------------------------------------
-
-// OBTENER CERTIFICADOS CON PASES VIP DE AWS
 app.get('/api/vessels/:id/certificates', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -197,14 +209,12 @@ app.get('/api/vessels/:id/certificates', verifyToken, async (req, res) => {
 
     const result = await pool.query('SELECT * FROM certificates WHERE vessel_id = $1 ORDER BY expiry_date ASC', [id]);
 
-    // MAGIA DE AWS: Por cada certificado, generamos un enlace temporal de 5 minutos
     const certificadosConUrl = await Promise.all(result.rows.map(async (cert) => {
       if (cert.image_url) {
         const command = new GetObjectCommand({
           Bucket: process.env.AWS_S3_BUCKET_NAME,
           Key: cert.image_url, 
         });
-        // 300 segundos = 5 minutos de validez
         cert.file_url = await getSignedUrl(s3, command, { expiresIn: 300 }); 
       }
       return cert;
@@ -216,43 +226,35 @@ app.get('/api/vessels/:id/certificates', verifyToken, async (req, res) => {
   }
 });
 
-// SUBIR NUEVO CERTIFICADO (Con foto a AWS S3)
 app.post('/api/certificates', verifyToken, upload.single('file'), async (req, res) => {
   const { vessel_id, type, expiry_date } = req.body;
   let s3FileName = null;
 
   try {
-    // 1. Validar propiedad de la nave
     const vesselCheck = await pool.query('SELECT id FROM vessels WHERE id = $1 AND tenant_id = $2', [vessel_id, req.user.tenant_id]);
     if (vesselCheck.rows.length === 0) return res.status(403).json({ error: "Acceso denegado" });
 
-    // 2. Si el usuario subió una foto, enviarla a AWS S3
     if (req.file) {
-      // Creamos un nombre único usando la fecha actual para que no se sobreescriban
       s3FileName = `certificados/${Date.now()}-${req.file.originalname}`;
-      
       const command = new PutObjectCommand({
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: s3FileName,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       });
-      await s3.send(command); // Despegue hacia la nube
+      await s3.send(command); 
     }
 
-    // 3. Motor de Estados
     const status = calculateStatus(expiry_date);
 
-    // 4. Guardar en PostgreSQL (Guardamos el nombre del archivo, no la foto)
     const result = await pool.query(
       'INSERT INTO certificates (vessel_id, type, expiry_date, image_url, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [vessel_id, type, expiry_date, s3FileName, status]
     );
 
-    // 5. ENVIAR TAREA A LA COLA DE REDIS (Segundo plano)
     if (status.includes("🟡") || status.includes("🔴")) {
       await notificacionesQueue.add({
-        email: req.user.email || 'gerente@naviera.com', // Tomamos el email del token
+        email: req.user.email || 'gerente@naviera.com', 
         nave: vessel_id,
         mensaje: `El certificado tipo ${type} está en estado: ${status}`
       });
@@ -264,12 +266,10 @@ app.post('/api/certificates', verifyToken, upload.single('file'), async (req, re
   }
 });
 
-// SOLICITAR RENOVACIÓN A UN CLIC (Cambio a 🔵 EN TRÁMITE)
 app.post('/api/certificates/:id/renew', verifyToken, async (req, res) => {
   const { id } = req.params;
 
   try {
-    // 1. Obtenemos información del certificado y la nave para el correo
     const certInfo = await pool.query(`
       SELECT c.type, v.name, v.registration_number 
       FROM certificates c 
@@ -280,14 +280,12 @@ app.post('/api/certificates/:id/renew', verifyToken, async (req, res) => {
     if (certInfo.rows.length === 0) return res.status(403).json({ error: "No autorizado" });
 
     const info = certInfo.rows[0];
-
-    // 2. Actualizamos el estado en la base de datos a "En Trámite"
     const nuevoEstado = '🔵 EN TRÁMITE';
+    
     await pool.query('UPDATE certificates SET status = $1 WHERE id = $2', [nuevoEstado, id]);
 
-    // 3. Enviamos el trabajo de redacción de correo al Capataz (Redis)
     await notificacionesQueue.add({
-      email: 'inspecciones@directemar.cl', // Simulación del correo de la autoridad
+      email: 'inspecciones@directemar.cl', 
       nave: info.name,
       mensaje: `SOLICITUD DE INSPECCIÓN: El armador de la nave ${info.name} (Matrícula: ${info.registration_number}) solicita formalmente la renovación del certificado: ${info.type}. Por favor, indicar disponibilidad del inspector.`
     });
@@ -298,25 +296,20 @@ app.post('/api/certificates/:id/renew', verifyToken, async (req, res) => {
   }
 });
 
-// 👑 MODO DIOS: Panel de Onboarding (Crear nueva Naviera y su Gerente)
 app.post('/api/onboarding', async (req, res) => {
   const { naviera_name, admin_email, admin_password } = req.body;
 
   try {
-    // 1. Registramos la nueva empresa con su correo de contacto obligatorio
     const tenantResult = await pool.query(
       'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING id',
       [naviera_name, admin_email]
     );
     
-    // AQUÍ ESTABA EL DETALLE: Guardamos el ID que nos devuelve PostgreSQL
     const newTenantId = tenantResult.rows[0].id;
 
-    // 2. Encriptamos la contraseña por seguridad
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(admin_password, salt);
 
-    // 3. Creamos al Gerente y le entregamos las llaves de ese Tenant (usando password_hash)
     await pool.query(
       'INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)',
       [newTenantId, admin_email, hashedPassword, 'admin']
@@ -331,7 +324,6 @@ app.post('/api/onboarding', async (req, res) => {
   }
 });
 
-// ELIMINAR NAVE (Desguace)
 app.delete('/api/vessels/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   try {
@@ -354,14 +346,11 @@ app.delete('/api/vessels/:id', verifyToken, async (req, res) => {
 // 5. ENCENDIDO DEL MOTOR
 // ==========================================
 
-// ⚡ SCRIPT DE REPARACIÓN: Alinear Naviera (Tenant)
 async function alinearTenant() {
   try {
-    // Buscamos la Latitud 41
     const nave = await pool.query("SELECT id, tenant_id FROM vessels WHERE name = 'Latitud 41' LIMIT 1");
     
     if (nave.rows.length > 0) {
-      // Forzamos al capitán a pertenecer a la MISMA naviera de esa nave
       await pool.query(
         "UPDATE users SET tenant_id = $1 WHERE email = 'capitan@latitud41.cl'",
         [nave.rows[0].tenant_id]
@@ -377,14 +366,11 @@ async function alinearTenant() {
 
 alinearTenant();
 
-// ==========================================
-// RUTA DE PRUEBA: DISPARADOR DE CORREO (V2)
-// ==========================================
 app.get('/api/test-email', async (req, res) => {
   try {
     const { data, error } = await resend.emails.send({
       from: 'Acme <onboarding@resend.dev>',
-      to: 'carlos.maldonado@kairosmb.org', // ⚠️ TU CORREO AQUÍ
+      to: 'carlos.maldonado@kairosmb.org',
       subject: '⚓ Alerta de Flota: Kairos Maritime',
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
@@ -395,7 +381,6 @@ app.get('/api/test-email', async (req, res) => {
       `
     });
 
-    // Si Resend devuelve un error interno, lo atrapamos aquí:
     if (error) {
       console.error('Error devuelto por Resend:', error);
       return res.status(400).json({ mensaje: 'El cartero falló', detalles: error });
@@ -408,15 +393,10 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
-// ==========================================
-// ⏰ PILOTO AUTOMÁTICO INTELIGENTE (CRON JOB)
-// ==========================================
-// Se ejecuta todos los días a las 08:00 AM (Hora de Chile)
 cron.schedule('0 8 * * *', async () => {
   console.log('⏰ [Radar Automático] Iniciando escaneo matutino de la flota...');
   
   try {
-    // 1. Buscar certificados que vencen en 30 días o menos (o que ya vencieron)
     const result = await pool.query(`
       SELECT 
         c.name AS cert_name, 
@@ -429,15 +409,12 @@ cron.schedule('0 8 * * *', async () => {
 
     const expiringCerts = result.rows;
 
-    // Si no hay vencimientos, el sistema sigue durmiendo tranquilamente
     if (expiringCerts.length === 0) {
       console.log('✅ [Cron] Flota en regla. No hay vencimientos próximos hoy.');
       return;
     }
 
-    // 2. Construir el reporte en HTML
     let htmlRows = expiringCerts.map(cert => {
-      // Formateamos la fecha para que se lea fácil en Chile (DD-MM-YYYY)
       const fechaFormat = new Date(cert.expiration_date).toLocaleDateString('es-CL');
       return `<li style="margin-bottom: 10px;">🚢 <b>${cert.vessel_name}</b>: ${cert.cert_name} <span style="color: #d97706;">(Vence/Venció: ${fechaFormat})</span></li>`;
     }).join('');
@@ -455,10 +432,9 @@ cron.schedule('0 8 * * *', async () => {
       </div>
     `;
 
-    // 3. Disparar el correo de alerta
     const { data, error } = await resend.emails.send({
-      from: 'Acme <onboarding@resend.dev>', // Mantendremos este hasta verificar el dominio
-      to: 'carlos.maldonado@kairosmb.org', // Correo de prueba
+      from: 'Acme <onboarding@resend.dev>',
+      to: 'carlos.maldonado@kairosmb.org',
       subject: '⚠️ Alerta de Vencimientos - Kairos Maritime',
       html: emailHtml
     });
@@ -474,7 +450,7 @@ cron.schedule('0 8 * * *', async () => {
   }
 }, {
   scheduled: true,
-  timezone: "America/Santiago" // <-- El truco maestro para la hora exacta
+  timezone: "America/Santiago"
 });
 
 app.listen(3001, () => {
