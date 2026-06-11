@@ -8,7 +8,7 @@ async function iniciarOnboarding() {
     // Edita solo estas tres líneas con los datos de tu prospecto:
 const datos = {
   naviera_name: "Naviera Lena",
-  admin_email: "makarena@servicioslena.cl",
+  admin_email: "carlos.maldonado@kairosmb.org",
   admin_password: "demo2026" // Usa una clave fácil para la demostración
 };
   
