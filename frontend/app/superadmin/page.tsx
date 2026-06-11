@@ -15,7 +15,8 @@ export default function SuperAdminPage() {
     setStatusMsg(null);
 
     try {
-      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/onboarding", {
+      // 🛰️ COORDINADAS ACTUALIZADAS: Apuntando al nuevo motor optimizado
+      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/superadmin/create-tenant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -29,7 +30,9 @@ export default function SuperAdminPage() {
 
       if (response.ok) {
         setStatusMsg({ type: 'success', text: data.message });
-        setNavieraName(""); setAdminEmail(""); setAdminPassword("");
+        setNavieraName(""); 
+        setAdminEmail(""); 
+        setAdminPassword("");
       } else {
         throw new Error(data.error || "Error al desplegar infraestructura");
       }
