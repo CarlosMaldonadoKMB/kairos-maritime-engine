@@ -523,7 +523,8 @@ app.get('/api/trigger-demo', async (req, res) => {
     res.status(500).json({ error: "Fallo al disparar los correos" });
   }
 });
+// Tu nueva ruta debe estar por aquí arriba...
 
 app.listen(3001, () => {
-  console.log('🚀 Kairos Backend navegando en puerto 3001 (Conectado a AWS S3)');
+  console.log('🚀 Kairos Backend navegando...');
 });
