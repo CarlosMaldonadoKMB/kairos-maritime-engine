@@ -393,60 +393,67 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
+// ==========================================
+// ⏰ PILOTO AUTOMÁTICO INTELIGENTE (1 Correo x Certificado)
+// ==========================================
 cron.schedule('0 8 * * *', async () => {
-  console.log('⏰ [Radar Automático] Iniciando escaneo matutino de la flota...');
+  console.log('⏰ [Radar Automático] Iniciando escaneo matutino...');
   
   try {
     const result = await pool.query(`
       SELECT 
-        c.name AS cert_name, 
-        c.expiration_date, 
-        v.name AS vessel_name 
+        c.type AS cert_name, 
+        c.expiry_date, 
+        v.name AS vessel_name,
+        u.email AS gerente_email
       FROM certificates c
       JOIN vessels v ON c.vessel_id = v.id
-      WHERE c.expiration_date <= CURRENT_DATE + INTERVAL '30 days'
+      JOIN users u ON v.tenant_id = u.tenant_id
+      WHERE c.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+      AND u.role = 'admin'
     `);
 
     const expiringCerts = result.rows;
 
     if (expiringCerts.length === 0) {
-      console.log('✅ [Cron] Flota en regla. No hay vencimientos próximos hoy.');
+      console.log('✅ [Cron] Flota en regla. No hay vencimientos.');
       return;
     }
 
-    let htmlRows = expiringCerts.map(cert => {
-      const fechaFormat = new Date(cert.expiration_date).toLocaleDateString('es-CL');
-      return `<li style="margin-bottom: 10px;">🚢 <b>${cert.vessel_name}</b>: ${cert.cert_name} <span style="color: #d97706;">(Vence/Venció: ${fechaFormat})</span></li>`;
-    }).join('');
+    console.log(`⚠️ Se detectaron ${expiringCerts.length} certificados críticos. Disparando correos individuales...`);
 
-    const emailHtml = `
-      <div style="font-family: sans-serif; color: #333;">
-        <h2 style="color: #1e293b;">Kairos Maritime - Reporte de Estado</h2>
-        <p>Estimado Gerente,</p>
-        <p>El sistema automático ha detectado los siguientes documentos que requieren su atención:</p>
-        <ul style="background-color: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0;">
-          ${htmlRows}
-        </ul>
-        <p>Por favor, ingrese a su panel de control para gestionar la renovación.</p>
-        <p>Atentamente,<br><b>Su Sistema Kairos</b></p>
-      </div>
-    `;
+    // EL BUCLE: Dispara un correo por cada documento encontrado
+    for (const cert of expiringCerts) {
+      const fechaFormat = new Date(cert.expiry_date).toLocaleDateString('es-CL');
+      const esVencido = new Date(cert.expiry_date) < new Date();
+      
+      const colorTema = esVencido ? '#ef4444' : '#f59e0b'; // Rojo o Naranja
+      const estadoTexto = esVencido ? '🔴 VENCIDO' : '🟡 POR VENCER';
 
-    const { data, error } = await resend.emails.send({
-      from: 'Acme <onboarding@resend.dev>',
-      to: 'carlos.maldonado@kairosmb.org',
-      subject: '⚠️ Alerta de Vencimientos - Kairos Maritime',
-      html: emailHtml
-    });
-
-    if (error) {
-      console.error('❌ [Cron] Error al enviar reporte:', error);
-    } else {
-      console.log(`✅ [Cron] Reporte enviado con éxito (${expiringCerts.length} alertas). ID:`, data?.id);
+      await resend.emails.send({
+        from: 'Kairos Maritime <onboarding@resend.dev>', // Tu remitente
+        to: cert.gerente_email, // Le llega al gerente de esa naviera específica
+        subject: `⚠️ Alerta: ${cert.vessel_name} - ${cert.cert_name} ${estadoTexto}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; border: 2px solid ${colorTema}; padding: 20px; border-radius: 8px;">
+            <h2 style="color: ${colorTema};">Alerta Crítica de Cumplimiento</h2>
+            <p>Estimado Gerente,</p>
+            <p>El sistema automático ha detectado una irregularidad en su flota:</p>
+            <ul>
+              <li><b>Nave:</b> ${cert.vessel_name}</li>
+              <li><b>Documento:</b> ${cert.cert_name}</li>
+              <li><b>Estado:</b> <span style="color: ${colorTema}; font-weight: bold;">${estadoTexto}</span></li>
+              <li><b>Fecha límite:</b> ${fechaFormat}</li>
+            </ul>
+            <p>Por favor, coordine la inspección para evitar la paralización de la nave.</p>
+          </div>
+        `
+      });
+      console.log(`✉️ Correo enviado: ${cert.vessel_name} - ${cert.cert_name}`);
     }
 
   } catch (err) {
-    console.error('❌ [Cron] Falla crítica en el escaneo de base de datos:', err);
+    console.error('❌ [Cron] Falla crítica en el escaneo:', err);
   }
 }, {
   scheduled: true,
