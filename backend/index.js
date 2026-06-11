@@ -460,6 +460,70 @@ cron.schedule('0 8 * * *', async () => {
   timezone: "America/Santiago"
 });
 
+// ==========================================
+// 🚀 RUTA DEMO: DISPARADOR MANUAL DE CORREOS
+// ==========================================
+app.get('/api/trigger-demo', async (req, res) => {
+  console.log('🚀 [DEMO] Forzando escaneo y envío de correos en vivo...');
+  
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.type AS cert_name, 
+        c.expiry_date, 
+        v.name AS vessel_name,
+        u.email AS gerente_email
+      FROM certificates c
+      JOIN vessels v ON c.vessel_id = v.id
+      JOIN users u ON v.tenant_id = u.tenant_id
+      WHERE c.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+      AND u.role = 'admin'
+    `);
+
+    const expiringCerts = result.rows;
+
+    if (expiringCerts.length === 0) {
+      return res.json({ mensaje: "Todo en regla. No hay certificados vencidos para alertar." });
+    }
+
+    for (const cert of expiringCerts) {
+      const fechaFormat = new Date(cert.expiry_date).toLocaleDateString('es-CL');
+      const esVencido = new Date(cert.expiry_date) < new Date();
+      const colorTema = esVencido ? '#ef4444' : '#f59e0b'; 
+      const estadoTexto = esVencido ? '🔴 VENCIDO' : '🟡 POR VENCER';
+
+      await resend.emails.send({
+        from: 'Kairos Maritime <onboarding@resend.dev>', 
+        to: cert.gerente_email, 
+        subject: `⚠️ Alerta: ${cert.vessel_name} - ${cert.cert_name} ${estadoTexto}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; border: 2px solid ${colorTema}; padding: 20px; border-radius: 8px;">
+            <h2 style="color: ${colorTema};">Alerta Crítica de Cumplimiento</h2>
+            <p>Estimado Gerente,</p>
+            <p>El sistema automático ha detectado una irregularidad en su flota:</p>
+            <ul>
+              <li><b>Nave:</b> ${cert.vessel_name}</li>
+              <li><b>Documento:</b> ${cert.cert_name}</li>
+              <li><b>Estado:</b> <span style="color: ${colorTema}; font-weight: bold;">${estadoTexto}</span></li>
+              <li><b>Fecha límite:</b> ${fechaFormat}</li>
+            </ul>
+            <p>Por favor, coordine la inspección para evitar la paralización de la nave.</p>
+          </div>
+        `
+      });
+    }
+
+    res.json({ 
+      exito: true, 
+      mensaje: `¡Bombardeo exitoso! Se enviaron ${expiringCerts.length} correos de alerta a la gerencia.` 
+    });
+
+  } catch (err) {
+    console.error('❌ Error en el disparador manual:', err);
+    res.status(500).json({ error: "Fallo al disparar los correos" });
+  }
+});
+
 app.listen(3001, () => {
   console.log('🚀 Kairos Backend navegando en puerto 3001 (Conectado a AWS S3)');
 });
