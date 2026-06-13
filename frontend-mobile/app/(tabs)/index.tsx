@@ -1,22 +1,28 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, ScrollView, Alert, ActivityIndicator } from 'react-native'; // <-- CORREGIDO AQUÍ
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useState, useRef, useEffect } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, ScrollView, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 
-export default function App() {
+export default function HomeScreen() {
+  // ==========================================
+  // 🛰️ COORDENADAS DE SIMULACIÓN (Para tus pruebas en Neon)
+  // ==========================================
+  const TOKEN_COMPLETO = "TU_TOKEN_DE_CAPITAN_AQUÍ"; // Puedes dejarlo fijo para probar o leerlo de tu Auth
+  const VESSEL_ID_NEON = "ID_DE_LA_NAVE_DE_NEON";    // El UUID de la nave que creaste en tu panel
+
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
   const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [vesselName, setVesselName] = useState('');
   const [certType, setCertType] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+  const [loading, setLoading] = useState(false);
   
-  // 📦 NUEVO ESTADO: Contador de la bodega (Offline)
+  // Contador de la bodega de almacenamiento local (Offline)
   const [pendientes, setPendientes] = useState<any[]>([]);
 
-  // Al abrir la app, revisamos si quedaron documentos pendientes en la bodega
+  // Al iniciar, inspeccionamos si la bodega tiene carga retenida
   useEffect(() => {
     cargarBodega();
   }, []);
@@ -28,17 +34,17 @@ export default function App() {
         setPendientes(JSON.parse(guardados));
       }
     } catch (e) {
-      console.error("Error leyendo la bodega:", e);
+      console.error("Error leyendo la bodega de almacenamiento:", e);
     }
   }
 
-  if (!permission) return <View />;
+  if (!permission) return <View style={styles.container} />;
 
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={{ textAlign: 'center', marginBottom: 20, fontSize: 18, color: 'white' }}>
-          ⚓ Kairos requiere acceso a tu cámara.
+        <Text style={styles.permissionText}>
+          ⚓ Kairos requiere acceso a tu cámara para digitalizar certificados en altamar.
         </Text>
         <Button onPress={requestPermission} title="Conceder Permiso" color="#10b981" />
       </View>
@@ -47,92 +53,91 @@ export default function App() {
 
   async function tomarFoto() {
     if (cameraRef.current) {
-      const photo = await cameraRef.current.takePictureAsync();
-      setFotoUri(photo.uri); 
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
+      if (photo) setFotoUri(photo.uri); 
     }
   }
 
-  // 🚀 EL NUEVO CEREBRO INTELIGENTE DE ENVÍO
+  // 🔥 CEREBRO DE ENRUTAMIENTO (Detecta si hay internet o guarda en Bodega)
   async function procesarCertificado() {
-    if (!vesselName || !certType || !expiryDate) {
-      Alert.alert("Faltan Datos", "Por favor completa todos los campos.");
+    if (!certType || !expiryDate || !fotoUri) {
+      Alert.alert("Campos Incompletos", "Por favor completa el tipo, la fecha y captura la foto.");
       return;
     }
 
-    // 1. Consultar el Radar de Red
     const networkState = await Network.getNetworkStateAsync();
     
-    // Empaquetamos la data
     const paquete = {
       id: Date.now().toString(),
       uri: fotoUri,
-      vesselName,
+      vesselId: VESSEL_ID_NEON,
       certType,
       expiryDate,
     };
 
     if (!networkState.isConnected || !networkState.isInternetReachable) {
-      // 🔴 MODO OFFLINE: Guardar en Bodega
-      console.log("📡 Sin señal. Guardando en bodega local...");
+      // 🔴 MODO OFFLINE: Se almacena en los contenedores locales
+      console.log("📡 Sin señal en altamar. Guardando en bodega local...");
       const nuevaBodega = [...pendientes, paquete];
       await AsyncStorage.setItem('@bodega_kairos', JSON.stringify(nuevaBodega));
       setPendientes(nuevaBodega);
       
-      Alert.alert("📡 Sin Conexión", "Documento guardado en la bodega. Recuerda sincronizar cuando recuperes la señal.");
+      Alert.alert("📡 Modo Offline Activated", "Documento resguardado en la bodega del teléfono. Sincroniza al llegar a puerto.");
       limpiarFormulario();
       return;
     }
 
-    // 🟢 MODO ONLINE: Disparo directo a Render/AWS
-    await enviarAlServidor(paquete);
+    // 🟢 MODO ONLINE: Transmisión directa al motor en Render
+    setLoading(true);
+    const exito = await enviarAlServidor(paquete);
+    setLoading(false);
+    if (exito) {
+      Alert.alert("✅ Transmisión Exitosa", "Certificado procesado y asegurado en la nube corporativa.");
+      limpiarFormulario();
+    }
   }
 
   async function enviarAlServidor(paquete: any, esSincronizacion = false) {
-    console.log("🚀 Transmitiendo a la central...");
     const formData = new FormData();
+    
+    // El backend optimizado exige file, vessel_id, type y expiry_date
+    formData.append('vessel_id', paquete.vesselId);
+    formData.append('type', paquete.certType);
+    formData.append('expiry_date', paquete.expiryDate);
+    
     formData.append('file', {
       uri: paquete.uri,
       name: `certificado_${paquete.id}.jpg`,
       type: 'image/jpeg',
     } as any);
-    
-    formData.append('vessel_name', paquete.vesselName);
-    formData.append('type', paquete.certType);
-    formData.append('expiry_date', paquete.expiryDate);
 
     try {
-      const urlBackend = 'https://kairos-maritime-backend.onrender.com/api/upload'; 
-      const response = await fetch(urlBackend, {
+      // Apuntamos a la ruta protegida multi-tenant que interactúa con Neon y S3
+      const response = await fetch('https://kairos-maritime-backend.onrender.com/api/certificates', {
         method: 'POST',
         body: formData,
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${TOKEN_COMPLETO}` // Guardia de seguridad activado
+        },
       });
 
-      if (response.ok) {
-        if (!esSincronizacion) {
-          Alert.alert("✅ Misión Cumplida", "Documento asegurado en la nube.");
-          limpiarFormulario();
-        }
-        return true; // Éxito
-      } else {
-        if (!esSincronizacion) Alert.alert("🔴 Error", "El radar central rechazó el paquete.");
-        return false;
-      }
+      return response.ok;
     } catch (error) {
-      if (!esSincronizacion) Alert.alert("❌ Falla", "Revisa tu conexión a internet.");
+      console.error("Fallo de transmisión:", error);
       return false;
     }
   }
 
-  // 🔄 BOTÓN DE SINCRONIZACIÓN MÚLTIPLE
+  // 🔄 SINCRONIZADOR MASIVO (Para cuando recuperan señal en el muelle)
   async function sincronizarPendientes() {
     const networkState = await Network.getNetworkStateAsync();
     if (!networkState.isConnected) {
-      Alert.alert("Aviso", "Aún no tienes conexión a internet para sincronizar.");
+      Alert.alert("Sin Señal", "Aún no detectamos conexión estable a internet.");
       return;
     }
 
-    Alert.alert("Sincronizando...", `Enviando ${pendientes.length} documentos.`);
+    setLoading(true);
     let enviadosExito = 0;
 
     for (const item of pendientes) {
@@ -140,41 +145,52 @@ export default function App() {
       if (exito) enviadosExito++;
     }
 
-    // Limpiamos la bodega
     await AsyncStorage.removeItem('@bodega_kairos');
     setPendientes([]);
-    Alert.alert("✅ Sincronización Completa", `Se subieron ${enviadosExito} documentos a la base central.`);
+    setLoading(false);
+    
+    Alert.alert("✅ Bodega Sincronizada", `Se subieron ${enviadosExito} documentos pendientes al servidor central.`);
   }
 
   function limpiarFormulario() {
     setFotoUri(null);
-    setVesselName('');
     setCertType('');
     setExpiryDate('');
   }
 
   // ==========================================
-  // RENDERIZADO VISUAL
+  // INTERFAZ VISUAL (UI)
   // ==========================================
-
   if (fotoUri) {
     return (
       <ScrollView style={styles.formContainer}>
-        <Text style={styles.title}>📋 Detalles del Documento</Text>
+        <Text style={styles.title}>📋 Detalles del Certificado</Text>
         <Image source={{ uri: fotoUri }} style={styles.previewImage} />
-        <Text style={styles.label}>Nave (Ej: Latitud 41)</Text>
-        <TextInput style={styles.input} placeholderTextColor="#64748b" placeholder="Nombre de la nave..." value={vesselName} onChangeText={setVesselName} />
+        
         <Text style={styles.label}>Tipo de Certificado</Text>
-        <TextInput style={styles.input} placeholderTextColor="#64748b" placeholder="Ej: Certificado Médico..." value={certType} onChangeText={setCertType} />
+        <TextInput 
+          style={styles.input} 
+          placeholderTextColor="#64748b" 
+          placeholder="Ej: Balsa Salvavidas, Extintores..." 
+          value={certType} 
+          onChangeText={setCertType} 
+        />
+        
         <Text style={styles.label}>Fecha de Vencimiento</Text>
-        <TextInput style={styles.input} placeholderTextColor="#64748b" placeholder="YYYY-MM-DD" value={expiryDate} onChangeText={setExpiryDate} />
+        <TextInput 
+          style={styles.input} 
+          placeholderTextColor="#64748b" 
+          placeholder="AAAA-MM-DD" 
+          value={expiryDate} 
+          onChangeText={setExpiryDate} 
+        />
 
         <View style={styles.formButtons}>
-          <TouchableOpacity style={[styles.button, { backgroundColor: '#ef4444', flex: 1, marginRight: 10 }]} onPress={limpiarFormulario}>
+          <TouchableOpacity style={[styles.button, { backgroundColor: '#ef4444', flex: 1, marginRight: 10 }]} onPress={limpiarFormulario} disabled={loading}>
             <Text style={styles.text}>🗑️ DESCARTAR</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={procesarCertificado}>
-            <Text style={styles.text}>🚀 PROCESAR</Text>
+          <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={procesarCertificado} disabled={loading}>
+            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.text}>🚀 PROCESAR</Text>}
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -185,15 +201,16 @@ export default function App() {
     <View style={styles.container}>
       <CameraView style={styles.camera} facing="back" ref={cameraRef} />
       
-      {/* 📦 ALERTA FLOTANTE SI HAY PENDIENTES */}
       {pendientes.length > 0 && (
-        <TouchableOpacity style={styles.bodegaBanner} onPress={sincronizarPendientes}>
-          <Text style={styles.bodegaText}>⚠️ Tienes {pendientes.length} documentos offline. Toca aquí para sincronizar.</Text>
+        <TouchableOpacity style={styles.bodegaBanner} onPress={sincronizarPendientes} disabled={loading}>
+          <Text style={styles.bodegaText}>
+            {loading ? "Sincronizando contenedores..." : `⚠️ Tienes ${pendientes.length} cargas pendientes. Toca para sincronizar.`}
+          </Text>
         </TouchableOpacity>
       )}
 
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.button} onPress={tomarFoto}>
+        <TouchableOpacity style={styles.captureButton} onPress={tomarFoto}>
           <Text style={styles.text}>📸 CAPTURAR</Text>
         </TouchableOpacity>
       </View>
@@ -201,18 +218,23 @@ export default function App() {
   );
 }
 
+// ==========================================
+// HOJA DE ESTILOS ÚNICA (Corregida)
+// ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
   camera: { flex: 1 },
+  permissionText: { textAlign: 'center', marginBottom: 20, fontSize: 16, color: 'white', paddingHorizontal: 20, marginTop: 100 },
   overlay: { position: 'absolute', bottom: 50, width: '100%', alignItems: 'center' },
-  button: { backgroundColor: '#10b981', paddingVertical: 15, paddingHorizontal: 30, borderRadius: 10, elevation: 5, alignItems: 'center' },
+  captureButton: { backgroundColor: '#10b981', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 12, elevation: 5 },
+  button: { backgroundColor: '#3b82f6', paddingVertical: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   text: { fontSize: 16, fontWeight: 'bold', color: 'white' },
   formContainer: { flex: 1, backgroundColor: '#0f172a', padding: 20 },
   title: { fontSize: 24, fontWeight: 'bold', color: 'white', marginTop: 40, marginBottom: 20, textAlign: 'center' },
-  previewImage: { width: '100%', height: 200, borderRadius: 10, marginBottom: 20, resizeMode: 'cover' },
-  label: { color: '#e2e8f0', fontSize: 16, marginBottom: 5, fontWeight: 'bold' },
+  previewImage: { width: '100%', height: 240, borderRadius: 12, marginBottom: 20, resizeMode: 'cover' },
+  label: { color: '#e2e8f0', fontSize: 15, marginBottom: 6, fontWeight: 'bold' },
   input: { backgroundColor: '#1e293b', color: 'white', padding: 15, borderRadius: 8, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
   formButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 40 },
   bodegaBanner: { position: 'absolute', top: 60, left: 20, right: 20, backgroundColor: '#f59e0b', padding: 15, borderRadius: 10, zIndex: 100 },
-  bodegaText: { color: 'white', fontWeight: 'bold', textAlign: 'center' }
+  bodegaText: { color: 'white', fontWeight: 'bold', textAlign: 'center', fontSize: 13 }
 });
