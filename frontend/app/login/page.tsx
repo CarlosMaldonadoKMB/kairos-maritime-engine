@@ -15,21 +15,38 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // 📡 Conectando con la sala de máquinas en Render
       const response = await fetch("https://kairos-maritime-backend.onrender.com/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
-      if (!response.ok) throw new Error("Credenciales incorrectas. Acceso denegado.");
+      // Si el backend lanza un error, capturamos el texto real
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Credenciales incorrectas. Acceso denegado.");
+      }
 
       const data = await response.json();
       
-      // 🔐 LA CAJA FUERTE: Guardamos el token en el navegador
+      // 🔐 LA CAJA FUERTE: Guardamos el token y el rol en el navegador
       localStorage.setItem("kairos_token", data.token);
+      localStorage.setItem("kairos_role", data.role);
       
-      // 🚀 Puerta abierta: Redirigimos al puente de mando (Dashboard)
-      router.push("/");
+      // 🧠 EL CEREBRO ENRUTADOR (Direccionamiento Táctico)
+      if (data.role === "superadmin") {
+        router.push("/superadmin"); // Tu Centro de Mando
+      } else if (data.role === "admin") {
+        router.push("/dashboard");  // El Panel de Makarena
+      } else if (data.role === "capitan") {
+        // 🚫 Bloqueo táctico: El capitán no puede usar la web
+        localStorage.removeItem("kairos_token"); 
+        localStorage.removeItem("kairos_role");
+        throw new Error("⚓ Acceso restringido. Los Capitanes deben operar exclusivamente desde la Aplicación Móvil.");
+      } else {
+        throw new Error("Rango desconocido en el sistema.");
+      }
       
     } catch (err: any) {
       setError(err.message);
