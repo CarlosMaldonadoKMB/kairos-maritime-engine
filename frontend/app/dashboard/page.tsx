@@ -96,7 +96,6 @@ export default function DashboardPage() {
   };
 
   // 🚀 Función para enviar el certificado a la base de datos
- // 🚀 Función para enviar el certificado a la base de datos
  const handleCrearCertificado = async (e: React.FormEvent) => {
   e.preventDefault();
   setGuardandoCert(true);
