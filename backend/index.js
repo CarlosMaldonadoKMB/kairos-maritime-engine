@@ -212,9 +212,13 @@ app.post('/api/certificates', verifyToken, upload.single('file'), async (req, re
   let s3FileName = null;
 
   try {
-    const vesselCheck = await pool.query('SELECT id FROM vessels WHERE id = $1 AND tenant_id = $2', [vessel_id, req.user.tenant_id]);
-    if (vesselCheck.rows.length === 0) return res.status(403).json({ error: "Acceso denegado" });
+    // 1. Monitor de entrada: Imprimirá en Render lo que está recibiendo
+    console.log(`📥 Procesando certificado [${type}] para la nave ID: ${vessel_id}`);
 
+    const vesselCheck = await pool.query('SELECT id FROM vessels WHERE id = $1 AND tenant_id = $2', [vessel_id, req.user.tenant_id]);
+    if (vesselCheck.rows.length === 0) return res.status(403).json({ error: "Acceso denegado a esta nave" });
+
+    // 2. AWS S3 (Si el capitán manda foto desde el móvil)
     if (req.file) {
       s3FileName = `certificados/${Date.now()}-${req.file.originalname}`;
       await s3.send(new PutObjectCommand({
@@ -225,22 +229,34 @@ app.post('/api/certificates', verifyToken, upload.single('file'), async (req, re
       })); 
     }
 
+    // 3. Calculamos semáforo y guardamos en Neon
     const status = calculateStatus(expiry_date);
     const result = await pool.query(
       'INSERT INTO certificates (vessel_id, type, expiry_date, image_url, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [vessel_id, type, expiry_date, s3FileName, status]
     );
 
-    if (status.includes("🟡") || status.includes("🔴")) {
-      await notificacionesQueue.add({
-        email: req.user.email || 'gerente@naviera.com', 
-        nave: vessel_id,
-        mensaje: `El certificado tipo ${type} está en estado: ${status}`
-      });
+    // 4. Redis (Intentamos enviar a la cola, pero si falla NO rompemos la app)
+    try {
+      if (status.includes("🟡") || status.includes("🔴")) {
+        await notificacionesQueue.add({
+          email: req.user.email || 'gerente@naviera.com', 
+          nave: vessel_id,
+          mensaje: `El certificado tipo ${type} está en estado: ${status}`
+        });
+      }
+    } catch (queueErr) {
+      console.log("⚠️ Advertencia: El sistema de colas (Redis) no está activo, pero el certificado se guardó.");
     }
 
+    console.log("✅ Certificado guardado con éxito:", result.rows[0]);
     res.status(201).json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    
+  } catch (err) { 
+    // 🚨 El megáfono: Ahora Render SÍ nos gritará cuál es el error exacto
+    console.error("❌ ERROR CRÍTICO AL GUARDAR CERTIFICADO:", err);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // ==========================================
