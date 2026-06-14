@@ -96,34 +96,38 @@ export default function DashboardPage() {
   };
 
   // 🚀 Función para enviar el certificado a la base de datos
-  const handleCrearCertificado = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGuardandoCert(true);
-    const token = localStorage.getItem("kairos_token");
+ // 🚀 Función para enviar el certificado a la base de datos
+ const handleCrearCertificado = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setGuardandoCert(true);
+  const token = localStorage.getItem("kairos_token");
 
-    try {
-      const response = await fetch("https://kairos-maritime-backend.onrender.com/api/certificates", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vessel_id: naveSeleccionada,
-          name: nuevoCertNombre,
-          expiration_date: nuevoCertFecha
-        })
-      });
+  try {
+    const response = await fetch("https://kairos-maritime-backend.onrender.com/api/certificates", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vessel_id: naveSeleccionada,
+        type: nuevoCertNombre,      // 👈 CORREGIDO: Neon espera 'type'
+        expiry_date: nuevoCertFecha // 👈 CORREGIDO: Neon espera 'expiry_date'
+      })
+    });
 
-      if (!response.ok) throw new Error("Fallo al registrar el documento.");
-
-      setMostrarModalCert(false);
-      setNuevoCertNombre("");
-      setNuevoCertFecha("");
-      escanearFlota(token!);
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setGuardandoCert(false);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Fallo al registrar el documento.");
     }
-  };
+
+    setMostrarModalCert(false);
+    setNuevoCertNombre("");
+    setNuevoCertFecha("");
+    escanearFlota(token!);
+  } catch (err: any) {
+    alert("Error del servidor: " + err.message);
+  } finally {
+    setGuardandoCert(false);
+  }
+};
 
   const abrirModalCert = (naveId: number) => {
     setNaveSeleccionada(naveId);
