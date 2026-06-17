@@ -1,16 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, ScrollView, Alert, ActivityIndicator } from 'react-native'; // <-- CORREGIDO AQUÍ
+import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
+import { jwtDecode } from "jwt-decode"; // <-- IMPORTACIÓN NUEVA PARA LEER EL TOKEN
 
 export default function HomeScreen() {
-  // ==========================================
-  // 🛰️ COORDENADAS DE SIMULACIÓN (Para tus pruebas en Neon)
-  // ==========================================
-  const TOKEN_COMPLETO = "TU_TOKEN_DE_CAPITAN_AQUÍ"; // Puedes dejarlo fijo para probar o leerlo de tu Auth
-  const VESSEL_ID_NEON = "ID_DE_LA_NAVE_DE_NEON";    // El UUID de la nave que creaste en tu panel
-
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -19,22 +14,35 @@ export default function HomeScreen() {
   const [expiryDate, setExpiryDate] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Contador de la bodega de almacenamiento local (Offline)
+  // ==========================================
+  // 🔐 ESTADOS DINÁMICOS DE AUTENTICACIÓN
+  // ==========================================
+  const [tokenCompleto, setTokenCompleto] = useState<string | null>(null);
+  const [vesselId, setVesselId] = useState<string | null>(null);
   const [pendientes, setPendientes] = useState<any[]>([]);
 
-  // Al iniciar, inspeccionamos si la bodega tiene carga retenida
+  // Al iniciar, inspeccionamos credenciales y la bodega retenida
   useEffect(() => {
-    cargarBodega();
+    cargarCredencialesYBodega();
   }, []);
 
-  async function cargarBodega() {
+  async function cargarCredencialesYBodega() {
     try {
+      // 1. Cargar Token y Nave asignada
+      const token = await AsyncStorage.getItem('kairos_token');
+      if (token) {
+        setTokenCompleto(token);
+        const decoded: any = jwtDecode(token);
+        setVesselId(decoded.assigned_vessel_id);
+      }
+
+      // 2. Cargar Bodega Offline
       const guardados = await AsyncStorage.getItem('@bodega_kairos');
       if (guardados) {
         setPendientes(JSON.parse(guardados));
       }
     } catch (e) {
-      console.error("Error leyendo la bodega de almacenamiento:", e);
+      console.error("Error leyendo credenciales o bodega:", e);
     }
   }
 
@@ -65,12 +73,17 @@ export default function HomeScreen() {
       return;
     }
 
+    if (!vesselId) {
+      Alert.alert("Error de Asignación", "No tienes una nave asignada. Contacta al gerente.");
+      return;
+    }
+
     const networkState = await Network.getNetworkStateAsync();
     
     const paquete = {
       id: Date.now().toString(),
       uri: fotoUri,
-      vesselId: VESSEL_ID_NEON,
+      vesselId: vesselId, // <-- AHORA USA EL ID REAL DEL CAPITÁN LOGUEADO
       certType,
       expiryDate,
     };
@@ -118,7 +131,7 @@ export default function HomeScreen() {
         body: formData,
         headers: { 
           'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${TOKEN_COMPLETO}` // Guardia de seguridad activado
+          'Authorization': `Bearer ${tokenCompleto}` // <-- AHORA USA EL TOKEN REAL
         },
       });
 
@@ -219,7 +232,7 @@ export default function HomeScreen() {
 }
 
 // ==========================================
-// HOJA DE ESTILOS ÚNICA (Corregida)
+// HOJA DE ESTILOS ÚNICA
 // ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
