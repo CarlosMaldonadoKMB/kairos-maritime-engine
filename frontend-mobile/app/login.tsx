@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { kairosFetch } from '@/services/api';
+
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -9,43 +11,35 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  async function manejarLogin() {
-    if (!email || !password) {
-      Alert.alert("Campos Vacíos", "Por favor, ingresa tu correo de tripulante y contraseña.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      // Apuntamos a la ruta de autenticación de tu motor en Render
-      const response = await fetch('https://kairos-maritime-backend.onrender.com/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Fallo en la autenticación');
-      }
-
-      // 🔐 GUARDADO DE CREDENCIALES: Guardamos el token maestro en la bodega del teléfono
-      await AsyncStorage.setItem('kairos_token', data.token);
-      
-      Alert.alert("⚓ Bienvenido a Bordo", "Credenciales validadas. Accediendo al puente de mando.");
-      
-      // Navegamos al Home reemplazando la ruta para que no puedan volver atrás con el botón físico
-      router.replace('/(tabs)');
-
-    } catch (error: any) {
-      console.error("❌ Error de Login:", error);
-      Alert.alert("Acceso Denegado", error.message || "No se pudo conectar con el servidor.");
-    } finally {
-      setLoading(false);
-    }
+async function manejarLogin() {
+  if (!email || !password) {
+    Alert.alert("Campos Vacíos", "Por favor, ingresa tu correo de tripulante y contraseña.");
+    return;
   }
+
+  setLoading(true);
+
+  try {
+    // Ya no necesitas poner la URL completa ni el header de JSON, 
+    // el servicio se encarga de eso.
+    const response = await kairosFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: email.trim(), password }),
+    });
+
+    const data = await response.json();
+    
+    // Aquí guardas el token y rediriges
+    await AsyncStorage.setItem('kairos_token', data.token);
+    // ... tu lógica de redirección
+    
+  } catch (error: any) {
+    // Si el error es el 401 que definimos en api.ts, se maneja aquí
+    Alert.alert("Error de Acceso", error.message || 'Fallo en la autenticación');
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <KeyboardAvoidingView 

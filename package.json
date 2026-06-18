@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "expo-image-picker": "^56.0.17"
+    "expo-image-picker": "^56.0.17",
+    "resend": "^6.12.4"
   }
 }
