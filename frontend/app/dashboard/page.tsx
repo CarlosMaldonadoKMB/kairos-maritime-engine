@@ -20,26 +20,29 @@ interface Vessel {
 }
 
 export default function Dashboard() {
-  const router = useRouter();
-  const [vessels, setVessels] = useState<Vessel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-
-  // NUEVO: ESTADO PARA EL ROL DEL USUARIO
-  const [userRole, setUserRole] = useState<string | null>(null);
-
-  // MODAL LOGIC
-  const [showModal, setShowModal] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newReg, setNewReg] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  // --- NUEVO: ESTADOS PARA GESTIÓN DE TRIPULACIÓN ---
-  const [showCrewModal, setShowCrewModal] = useState(false);
-  const [newCrewEmail, setNewCrewEmail] = useState("");
-  const [newCrewPassword, setNewCrewPassword] = useState("");
-  const [newCrewVesselId, setNewCrewVesselId] = useState("");
-  const [submittingCrew, setSubmittingCrew] = useState(false);
+    const router = useRouter();
+    
+    // Estados de datos
+    const [vessels, setVessels] = useState<Vessel[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [userRole, setUserRole] = useState<string | null>(null);
+    const [tenantId, setTenantId] = useState<string | null>(null); // <--- ID de la naviera
+  
+    // Estados de UI / Modales
+    const [showModal, setShowModal] = useState(false);
+    const [newName, setNewName] = useState("");
+    const [newReg, setNewReg] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+  
+    // Estados de Gestión de Tripulación
+    const [showCrewModal, setShowCrewModal] = useState(false);
+    const [newCrewEmail, setNewCrewEmail] = useState("");
+    const [newCrewPassword, setNewCrewPassword] = useState("");
+    const [newCrewVesselId, setNewCrewVesselId] = useState("");
+    const [submittingCrew, setSubmittingCrew] = useState(false);
+    
+    // ... el resto de tus funciones (fetchVessels, handleCrearCapitan, etc)
 
   const fetchVessels = useCallback(async () => {
     const token = localStorage.getItem("kairos_token");
@@ -122,9 +125,9 @@ export default function Dashboard() {
     e.preventDefault();
     setSubmittingCrew(true);
     const token = localStorage.getItem("kairos_token");
-
+  
     try {
-      const res = await fetch("https://kairos-maritime-backend.onrender.com/api/users", {
+      const res = await fetch("https://kairos-maritime-backend.onrender.com/api/capitanes", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,24 +136,24 @@ export default function Dashboard() {
         body: JSON.stringify({
           email: newCrewEmail,
           password: newCrewPassword,
-          role: "capitan",
+          tenant_id: tenantId, // <--- CAMBIADO A tenantId (el estado que definiste)
           assigned_vessel_id: newCrewVesselId,
         }),
       });
-
+  
       if (res.ok) {
         setShowCrewModal(false);
         setNewCrewEmail("");
         setNewCrewPassword("");
         setNewCrewVesselId("");
         alert("¡Capitán creado correctamente!");
-        // Opcional: podrías refrescar datos si lo requieres.
+        fetchVessels(); // Refrescamos la lista si es necesario
       } else {
         const data = await res.json();
         alert(data?.error || "Error al crear capitán");
       }
     } catch (err) {
-      alert("Error al crear capitán");
+      alert("Error al conectar con el servidor");
     } finally {
       setSubmittingCrew(false);
     }
@@ -618,4 +621,4 @@ export default function Dashboard() {
       )}
     </div>
   );
-}
+  }

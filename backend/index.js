@@ -128,6 +128,26 @@ app.post('/api/superadmin/create-tenant', async (req, res) => {
   }
 });
 
+// Ruta para crear capitanes asignados a una naviera (tenant)
+app.post('/api/capitanes', verifyToken, verifySuperAdmin, async (req, res) => {
+  const { email, password, tenant_id, assigned_vessel_id } = req.body;
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    await pool.query(
+      'INSERT INTO users (tenant_id, email, password_hash, role, assigned_vessel_id) VALUES ($1, $2, $3, $4, $5)',
+      [tenant_id, email, hashedPassword, 'capitan', assigned_vessel_id]
+    );
+
+    res.status(201).json({ success: true, message: "Capitán creado exitosamente." });
+  } catch (err) {
+    console.error("Error al crear capitán:", err);
+    res.status(500).json({ error: "No se pudo registrar el capitán en la base de datos." });
+  }
+});
+
 // ==========================================
 // 🚢 OPERACIONES DE LA FLOTA (PROTEGIDAS MULTI-TENANT)
 // ==========================================
