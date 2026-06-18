@@ -57,12 +57,14 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Middleware para proteger funciones exclusivas del Dueño del SaaS
-const verifySuperAdmin = (req, res, next) => {
-  if (req.user.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Acceso restringido. Requiere rango de SuperAdmin.' });
+// Renombramos a verifyAdminOrHigher para que sea más descriptivo
+const verifyAdminOrHigher = (req, res, next) => {
+  // Permitimos si el rol es superadmin O si es el admin de una naviera
+  if (req.user.role === 'superadmin' || req.user.role === 'admin') {
+    next();
+  } else {
+    return res.status(403).json({ error: 'Acceso restringido. Requiere rango de Administrador.' });
   }
-  next();
 };
 
 // ==========================================
@@ -128,9 +130,14 @@ app.post('/api/superadmin/create-tenant', async (req, res) => {
   }
 });
 
-// Ruta para crear capitanes asignados a una naviera (tenant)
-app.post('/api/capitanes', verifyToken, verifySuperAdmin, async (req, res) => {
+// Antes: app.post('/api/capitanes', verifyToken, verifySuperAdmin, ...
+// Ahora:
+app.post('/api/capitanes', verifyToken, verifyAdminOrHigher, async (req, res) => {
   const { email, password, tenant_id, assigned_vessel_id } = req.body;
+
+  // SEGURIDAD EXTRA: Evitar que un admin cree capitanes para OTRA naviera
+  // Si el usuario es 'admin', forzamos a que el tenant_id sea el suyo propio
+  const targetTenantId = req.user.role === 'admin' ? req.user.tenant_id : tenant_id;
 
   try {
     const salt = await bcrypt.genSalt(10);
@@ -138,13 +145,13 @@ app.post('/api/capitanes', verifyToken, verifySuperAdmin, async (req, res) => {
 
     await pool.query(
       'INSERT INTO users (tenant_id, email, password_hash, role, assigned_vessel_id) VALUES ($1, $2, $3, $4, $5)',
-      [tenant_id, email, hashedPassword, 'capitan', assigned_vessel_id]
+      [targetTenantId, email, hashedPassword, 'capitan', assigned_vessel_id]
     );
 
     res.status(201).json({ success: true, message: "Capitán creado exitosamente." });
   } catch (err) {
     console.error("Error al crear capitán:", err);
-    res.status(500).json({ error: "No se pudo registrar el capitán en la base de datos." });
+    res.status(500).json({ error: "No se pudo registrar el capitán." });
   }
 });
 
