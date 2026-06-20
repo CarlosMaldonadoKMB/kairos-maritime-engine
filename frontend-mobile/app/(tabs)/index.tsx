@@ -3,7 +3,7 @@ import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, Scr
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
-import { jwtDecode } from "jwt-decode"; // <-- IMPORTACIÓN NUEVA PARA LEER EL TOKEN
+import { jwtDecode } from "jwt-decode";
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -14,29 +14,22 @@ export default function HomeScreen() {
   const [expiryDate, setExpiryDate] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // ==========================================
-  // 🔐 ESTADOS DINÁMICOS DE AUTENTICACIÓN
-  // ==========================================
   const [tokenCompleto, setTokenCompleto] = useState<string | null>(null);
   const [vesselId, setVesselId] = useState<string | null>(null);
   const [pendientes, setPendientes] = useState<any[]>([]);
 
-  // Al iniciar, inspeccionamos credenciales y la bodega retenida
   useEffect(() => {
     cargarCredencialesYBodega();
   }, []);
 
   async function cargarCredencialesYBodega() {
     try {
-      // 1. Cargar Token y Nave asignada
       const token = await AsyncStorage.getItem('kairos_token');
       if (token) {
         setTokenCompleto(token);
         const decoded: any = jwtDecode(token);
         setVesselId(decoded.assigned_vessel_id);
       }
-
-      // 2. Cargar Bodega Offline
       const guardados = await AsyncStorage.getItem('@bodega_kairos');
       if (guardados) {
         setPendientes(JSON.parse(guardados));
@@ -46,11 +39,20 @@ export default function HomeScreen() {
     }
   }
 
-  if (!permission) return <View style={styles.container} />;
+  // 🛡️ BLINDAJE DE PERMISOS: Pantalla de carga en vez de pantalla negra
+  if (!permission) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#10b981" />
+        <Text style={{ color: 'white', marginTop: 10 }}>Iniciando ópticas del radar...</Text>
+      </View>
+    );
+  }
 
+  // 🛡️ BLINDAJE DE PERMISOS: Botón visible para solicitar acceso
   if (!permission.granted) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={styles.permissionText}>
           ⚓ Kairos requiere acceso a tu cámara para digitalizar certificados en altamar.
         </Text>
@@ -66,7 +68,6 @@ export default function HomeScreen() {
     }
   }
 
-  // 🔥 CEREBRO DE ENRUTAMIENTO (Detecta si hay internet o guarda en Bodega)
   async function procesarCertificado() {
     if (!certType || !expiryDate || !fotoUri) {
       Alert.alert("Campos Incompletos", "Por favor completa el tipo, la fecha y captura la foto.");
@@ -83,24 +84,22 @@ export default function HomeScreen() {
     const paquete = {
       id: Date.now().toString(),
       uri: fotoUri,
-      vesselId: vesselId, // <-- AHORA USA EL ID REAL DEL CAPITÁN LOGUEADO
+      vesselId: vesselId, 
       certType,
       expiryDate,
     };
 
     if (!networkState.isConnected || !networkState.isInternetReachable) {
-      // 🔴 MODO OFFLINE: Se almacena en los contenedores locales
       console.log("📡 Sin señal en altamar. Guardando en bodega local...");
       const nuevaBodega = [...pendientes, paquete];
       await AsyncStorage.setItem('@bodega_kairos', JSON.stringify(nuevaBodega));
       setPendientes(nuevaBodega);
       
-      Alert.alert("📡 Modo Offline Activated", "Documento resguardado en la bodega del teléfono. Sincroniza al llegar a puerto.");
+      Alert.alert("📡 Modo Offline Activado", "Documento resguardado en la bodega del teléfono. Sincroniza al llegar a puerto.");
       limpiarFormulario();
       return;
     }
 
-    // 🟢 MODO ONLINE: Transmisión directa al motor en Render
     setLoading(true);
     const exito = await enviarAlServidor(paquete);
     setLoading(false);
@@ -113,7 +112,6 @@ export default function HomeScreen() {
   async function enviarAlServidor(paquete: any, esSincronizacion = false) {
     const formData = new FormData();
     
-    // El backend optimizado exige file, vessel_id, type y expiry_date
     formData.append('vessel_id', paquete.vesselId);
     formData.append('type', paquete.certType);
     formData.append('expiry_date', paquete.expiryDate);
@@ -125,13 +123,12 @@ export default function HomeScreen() {
     } as any);
 
     try {
-      // Apuntamos a la ruta protegida multi-tenant que interactúa con Neon y S3
       const response = await fetch('https://kairos-maritime-backend.onrender.com/api/certificates', {
         method: 'POST',
         body: formData,
         headers: { 
           'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${tokenCompleto}` // <-- AHORA USA EL TOKEN REAL
+          'Authorization': `Bearer ${tokenCompleto}` 
         },
       });
 
@@ -142,7 +139,6 @@ export default function HomeScreen() {
     }
   }
 
-  // 🔄 SINCRONIZADOR MASIVO (Para cuando recuperan señal en el muelle)
   async function sincronizarPendientes() {
     const networkState = await Network.getNetworkStateAsync();
     if (!networkState.isConnected) {
@@ -171,9 +167,6 @@ export default function HomeScreen() {
     setExpiryDate('');
   }
 
-  // ==========================================
-  // INTERFAZ VISUAL (UI)
-  // ==========================================
   if (fotoUri) {
     return (
       <ScrollView style={styles.formContainer}>
@@ -231,9 +224,6 @@ export default function HomeScreen() {
   );
 }
 
-// ==========================================
-// HOJA DE ESTILOS ÚNICA
-// ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
   camera: { flex: 1 },

@@ -11,35 +11,34 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-async function manejarLogin() {
-  if (!email || !password) {
-    Alert.alert("Campos Vacíos", "Por favor, ingresa tu correo de tripulante y contraseña.");
-    return;
+  async function manejarLogin() {
+    if (!email || !password) {
+      Alert.alert("Campos Vacíos", "Por favor, ingresa tu correo de tripulante y contraseña.");
+      return;
+    }
+  
+    setLoading(true);
+  
+    try {
+      const response = await kairosFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+  
+      const data = await response.json();
+      
+      // 1. Guardamos el token en la memoria del celular de manera segura
+      await AsyncStorage.setItem('kairos_token', data.token);
+      
+      // 2. 🚀 REDIRECCIÓN ACTIVA: Rompemos el comentario y ordenamos el viaje hacia las pestañas principales
+      router.replace('/(tabs)' as any); 
+      
+    } catch (error: any) {
+      Alert.alert("Error de Acceso", error.message || 'Fallo en la autenticación');
+    } finally {
+      setLoading(false);
+    }
   }
-
-  setLoading(true);
-
-  try {
-    // Ya no necesitas poner la URL completa ni el header de JSON, 
-    // el servicio se encarga de eso.
-    const response = await kairosFetch('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: email.trim(), password }),
-    });
-
-    const data = await response.json();
-    
-    // Aquí guardas el token y rediriges
-    await AsyncStorage.setItem('kairos_token', data.token);
-    // ... tu lógica de redirección
-    
-  } catch (error: any) {
-    // Si el error es el 401 que definimos en api.ts, se maneja aquí
-    Alert.alert("Error de Acceso", error.message || 'Fallo en la autenticación');
-  } finally {
-    setLoading(false);
-  }
-}
 
   return (
     <KeyboardAvoidingView 
