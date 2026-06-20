@@ -138,7 +138,7 @@ export default function RadarScreen() {
       
       {/* CABECERA */}
       <View style={styles.header}>
-        <Text style={styles.headerGreeting}>Comandante</Text>
+        <Text style={styles.headerGreeting}>Capitán</Text>
         <Text style={styles.headerVessel}>{vesselData ? vesselData.name : "Nave en tránsito"}</Text>
       </View>
 
