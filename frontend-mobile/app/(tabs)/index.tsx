@@ -1,243 +1,218 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View, Image, TextInput, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
-import { jwtDecode } from "jwt-decode";
+import { jwtDecode } from 'jwt-decode';
 
-export default function HomeScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef<CameraView>(null);
-
-  const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [certType, setCertType] = useState('');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  const [tokenCompleto, setTokenCompleto] = useState<string | null>(null);
-  const [vesselId, setVesselId] = useState<string | null>(null);
-  const [pendientes, setPendientes] = useState<any[]>([]);
+export default function RadarScreen() {
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [vesselData, setVesselData] = useState<any>(null);
+  const [certStats, setCertStats] = useState({ total: 0, vencidos: 0, porVencer: 0, vigentes: 0 });
+  const [offlineDocs, setOfflineDocs] = useState<any[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    cargarCredencialesYBodega();
+    cargarRadar();
   }, []);
 
-  async function cargarCredencialesYBodega() {
+  const cargarRadar = async () => {
     try {
       const token = await AsyncStorage.getItem('kairos_token');
-      if (token) {
-        setTokenCompleto(token);
-        const decoded: any = jwtDecode(token);
-        setVesselId(decoded.assigned_vessel_id);
-      }
+      if (!token) throw new Error("No hay credenciales activas");
+
+      const decoded: any = jwtDecode(token);
+      const miVesselId = decoded.assigned_vessel_id;
+
+      // 1. Cargar Bodega Offline
       const guardados = await AsyncStorage.getItem('@bodega_kairos');
-      if (guardados) {
-        setPendientes(JSON.parse(guardados));
+      if (guardados) setOfflineDocs(JSON.parse(guardados));
+
+      if (!miVesselId) {
+        setError("Sin nave asignada.");
+        setLoading(false);
+        return;
       }
-    } catch (e) {
-      console.error("Error leyendo credenciales o bodega:", e);
-    }
-  }
 
-  // 🛡️ BLINDAJE DE PERMISOS: Pantalla de carga en vez de pantalla negra
-  if (!permission) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#10b981" />
-        <Text style={{ color: 'white', marginTop: 10 }}>Iniciando ópticas del radar...</Text>
-      </View>
-    );
-  }
-
-  // 🛡️ BLINDAJE DE PERMISOS: Botón visible para solicitar acceso
-  if (!permission.granted) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={styles.permissionText}>
-          ⚓ Kairos requiere acceso a tu cámara para digitalizar certificados en altamar.
-        </Text>
-        <Button onPress={requestPermission} title="Conceder Permiso" color="#10b981" />
-      </View>
-    );
-  }
-
-  async function tomarFoto() {
-    if (cameraRef.current) {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
-      if (photo) setFotoUri(photo.uri); 
-    }
-  }
-
-  async function procesarCertificado() {
-    if (!certType || !expiryDate || !fotoUri) {
-      Alert.alert("Campos Incompletos", "Por favor completa el tipo, la fecha y captura la foto.");
-      return;
-    }
-
-    if (!vesselId) {
-      Alert.alert("Error de Asignación", "No tienes una nave asignada. Contacta al gerente.");
-      return;
-    }
-
-    const networkState = await Network.getNetworkStateAsync();
-    
-    const paquete = {
-      id: Date.now().toString(),
-      uri: fotoUri,
-      vesselId: vesselId, 
-      certType,
-      expiryDate,
-    };
-
-    if (!networkState.isConnected || !networkState.isInternetReachable) {
-      console.log("📡 Sin señal en altamar. Guardando en bodega local...");
-      const nuevaBodega = [...pendientes, paquete];
-      await AsyncStorage.setItem('@bodega_kairos', JSON.stringify(nuevaBodega));
-      setPendientes(nuevaBodega);
-      
-      Alert.alert("📡 Modo Offline Activado", "Documento resguardado en la bodega del teléfono. Sincroniza al llegar a puerto.");
-      limpiarFormulario();
-      return;
-    }
-
-    setLoading(true);
-    const exito = await enviarAlServidor(paquete);
-    setLoading(false);
-    if (exito) {
-      Alert.alert("✅ Transmisión Exitosa", "Certificado procesado y asegurado en la nube corporativa.");
-      limpiarFormulario();
-    }
-  }
-
-  async function enviarAlServidor(paquete: any, esSincronizacion = false) {
-    const formData = new FormData();
-    
-    formData.append('vessel_id', paquete.vesselId);
-    formData.append('type', paquete.certType);
-    formData.append('expiry_date', paquete.expiryDate);
-    
-    formData.append('file', {
-      uri: paquete.uri,
-      name: `certificado_${paquete.id}.jpg`,
-      type: 'image/jpeg',
-    } as any);
-
-    try {
-      const response = await fetch('https://kairos-maritime-backend.onrender.com/api/certificates', {
-        method: 'POST',
-        body: formData,
-        headers: { 
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${tokenCompleto}` 
-        },
+      // 2. Cargar Nave
+      const resNaves = await fetch('https://kairos-maritime-backend.onrender.com/api/vessels', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+      const dataNaves = await resNaves.json();
+      const miNave = dataNaves.find((v: any) => v.id === miVesselId) || dataNaves[0];
+      if (miNave) setVesselData(miNave);
 
-      return response.ok;
-    } catch (error) {
-      console.error("Fallo de transmisión:", error);
-      return false;
+      // 3. Analizar Certificados para el Semáforo
+      const resCerts = await fetch('https://kairos-maritime-backend.onrender.com/api/certificates', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (resCerts.ok) {
+        const dataCerts = await resCerts.json();
+        const misCerts = dataCerts.filter((c: any) => c.vessel_id === miVesselId);
+        
+        let vencidos = 0; let porVencer = 0; let vigentes = 0;
+        const hoy = new Date().getTime();
+
+        misCerts.forEach((cert: any) => {
+          const vencimiento = new Date(cert.expiry_date).getTime();
+          const diasRestantes = Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24));
+          
+          if (diasRestantes < 0) vencidos++;
+          else if (diasRestantes <= 30) porVencer++;
+          else vigentes++;
+        });
+
+        setCertStats({ total: misCerts.length, vencidos, porVencer, vigentes });
+      }
+
+    } catch (err: any) {
+      setError("Fallo de conexión. Operando en modo offline.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  }
+  };
 
-  async function sincronizarPendientes() {
+  const onRefresh = () => {
+    setRefreshing(true);
+    cargarRadar();
+  };
+
+  // 🚀 Lógica de Sincronización VIP
+  const sincronizarBodega = async () => {
     const networkState = await Network.getNetworkStateAsync();
     if (!networkState.isConnected) {
-      Alert.alert("Sin Señal", "Aún no detectamos conexión estable a internet.");
+      Alert.alert("Sin Señal", "Aún no hay conexión a internet para sincronizar.");
       return;
     }
 
-    setLoading(true);
-    let enviadosExito = 0;
+    setSyncing(true);
+    try {
+      const token = await AsyncStorage.getItem('kairos_token');
+      let enviados = 0;
 
-    for (const item of pendientes) {
-      const exito = await enviarAlServidor(item, true);
-      if (exito) enviadosExito++;
+      for (const paquete of offlineDocs) {
+        const formData = new FormData();
+        formData.append('vessel_id', paquete.vesselId);
+        formData.append('type', paquete.certType);
+        formData.append('expiry_date', paquete.expiryDate);
+        formData.append('file', { uri: paquete.uri, name: `cert_${paquete.id}.jpg`, type: 'image/jpeg' } as any);
+
+        const res = await fetch('https://kairos-maritime-backend.onrender.com/api/certificates', {
+          method: 'POST',
+          body: formData,
+          headers: { 'Content-Type': 'multipart/form-data', 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) enviados++;
+      }
+
+      await AsyncStorage.removeItem('@bodega_kairos');
+      setOfflineDocs([]);
+      Alert.alert("Sincronización Exitosa", `Se subieron ${enviados} documentos a la nube.`);
+      cargarRadar();
+    } catch (e) {
+      Alert.alert("Error", "La sincronización falló parcialmente.");
+    } finally {
+      setSyncing(false);
     }
+  };
 
-    await AsyncStorage.removeItem('@bodega_kairos');
-    setPendientes([]);
-    setLoading(false);
-    
-    Alert.alert("✅ Bodega Sincronizada", `Se subieron ${enviadosExito} documentos pendientes al servidor central.`);
-  }
+  // 🚦 Determinar el estado del Semáforo
+  let zarpeStatus = { texto: "ZARPE AUTORIZADO", color: "#10b981", bgColor: "rgba(16, 185, 129, 0.15)", icono: "✅" };
+  if (certStats.porVencer > 0) zarpeStatus = { texto: "ZARPE CON PRECAUCIÓN", color: "#f59e0b", bgColor: "rgba(245, 158, 11, 0.15)", icono: "⚠️" };
+  if (certStats.vencidos > 0) zarpeStatus = { texto: "ZARPE DENEGADO", color: "#ef4444", bgColor: "rgba(239, 68, 68, 0.15)", icono: "⛔" };
 
-  function limpiarFormulario() {
-    setFotoUri(null);
-    setCertType('');
-    setExpiryDate('');
-  }
-
-  if (fotoUri) {
+  if (loading) {
     return (
-      <ScrollView style={styles.formContainer}>
-        <Text style={styles.title}>📋 Detalles del Certificado</Text>
-        <Image source={{ uri: fotoUri }} style={styles.previewImage} />
-        
-        <Text style={styles.label}>Tipo de Certificado</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholderTextColor="#64748b" 
-          placeholder="Ej: Balsa Salvavidas, Extintores..." 
-          value={certType} 
-          onChangeText={setCertType} 
-        />
-        
-        <Text style={styles.label}>Fecha de Vencimiento</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholderTextColor="#64748b" 
-          placeholder="AAAA-MM-DD" 
-          value={expiryDate} 
-          onChangeText={setExpiryDate} 
-        />
-
-        <View style={styles.formButtons}>
-          <TouchableOpacity style={[styles.button, { backgroundColor: '#ef4444', flex: 1, marginRight: 10 }]} onPress={limpiarFormulario} disabled={loading}>
-            <Text style={styles.text}>🗑️ DESCARTAR</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, { flex: 1 }]} onPress={procesarCertificado} disabled={loading}>
-            {loading ? <ActivityIndicator color="white" /> : <Text style={styles.text}>🚀 PROCESAR</Text>}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color="#10b981" />
+        <Text style={styles.loadingText}>Iniciando radar...</Text>
+      </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <CameraView style={styles.camera} facing="back" ref={cameraRef} />
+    <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#10b981" />}>
       
-      {pendientes.length > 0 && (
-        <TouchableOpacity style={styles.bodegaBanner} onPress={sincronizarPendientes} disabled={loading}>
-          <Text style={styles.bodegaText}>
-            {loading ? "Sincronizando contenedores..." : `⚠️ Tienes ${pendientes.length} cargas pendientes. Toca para sincronizar.`}
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      <View style={styles.overlay}>
-        <TouchableOpacity style={styles.captureButton} onPress={tomarFoto}>
-          <Text style={styles.text}>📸 CAPTURAR</Text>
-        </TouchableOpacity>
+      {/* CABECERA */}
+      <View style={styles.header}>
+        <Text style={styles.headerGreeting}>Comandante</Text>
+        <Text style={styles.headerVessel}>{vesselData ? vesselData.name : "Nave en tránsito"}</Text>
       </View>
-    </View>
+
+      {/* 🚦 SEMÁFORO DE ZARPE (CHECKLIST PRINCIPAL) */}
+      <View style={styles.paddingH}>
+        <View style={[styles.semaforoCard, { borderColor: zarpeStatus.color, backgroundColor: zarpeStatus.bgColor }]}>
+          <Text style={{ fontSize: 32, marginBottom: 5 }}>{zarpeStatus.icono}</Text>
+          <Text style={[styles.semaforoText, { color: zarpeStatus.color }]}>{zarpeStatus.texto}</Text>
+          <Text style={styles.semaforoSubtext}>
+            {certStats.vencidos > 0 ? `Tienes ${certStats.vencidos} documento(s) vencido(s). Regulariza antes de zarpar.` : 
+             certStats.porVencer > 0 ? `Tienes ${certStats.porVencer} documento(s) próximo(s) a vencer.` : 
+             "Todos los documentos se encuentran en regla. Buen viaje."}
+          </Text>
+        </View>
+
+        {/* 📊 RESUMEN NUMÉRICO */}
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Text style={[styles.statNum, { color: '#10b981' }]}>{certStats.vigentes}</Text>
+            <Text style={styles.statLabel}>Vigentes</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={[styles.statNum, { color: '#f59e0b' }]}>{certStats.porVencer}</Text>
+            <Text style={styles.statLabel}>Por Vencer</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={[styles.statNum, { color: '#ef4444' }]}>{certStats.vencidos}</Text>
+            <Text style={styles.statLabel}>Vencidos</Text>
+          </View>
+        </View>
+
+        {/* ☁️ COLA OFFLINE VIP (Solo aparece si hay documentos sin subir) */}
+        {offlineDocs.length > 0 && (
+          <View style={styles.offlineCard}>
+            <View style={styles.offlineHeader}>
+              <Text style={styles.offlineTitle}>📡 Nube Sincronización</Text>
+              <View style={styles.badge}><Text style={styles.badgeText}>{offlineDocs.length}</Text></View>
+            </View>
+            <Text style={styles.offlineDesc}>Tienes documentos capturados en altamar esperando ser enviados a la central.</Text>
+            <TouchableOpacity style={styles.syncBtn} onPress={sincronizarBodega} disabled={syncing}>
+              {syncing ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.syncBtnText}>⬆️ SINCRONIZAR AHORA</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
-  camera: { flex: 1 },
-  permissionText: { textAlign: 'center', marginBottom: 20, fontSize: 16, color: 'white', paddingHorizontal: 20, marginTop: 100 },
-  overlay: { position: 'absolute', bottom: 50, width: '100%', alignItems: 'center' },
-  captureButton: { backgroundColor: '#10b981', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 12, elevation: 5 },
-  button: { backgroundColor: '#3b82f6', paddingVertical: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  text: { fontSize: 16, fontWeight: 'bold', color: 'white' },
-  formContainer: { flex: 1, backgroundColor: '#0f172a', padding: 20 },
-  title: { fontSize: 24, fontWeight: 'bold', color: 'white', marginTop: 40, marginBottom: 20, textAlign: 'center' },
-  previewImage: { width: '100%', height: 240, borderRadius: 12, marginBottom: 20, resizeMode: 'cover' },
-  label: { color: '#e2e8f0', fontSize: 15, marginBottom: 6, fontWeight: 'bold' },
-  input: { backgroundColor: '#1e293b', color: 'white', padding: 15, borderRadius: 8, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  formButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 40 },
-  bodegaBanner: { position: 'absolute', top: 60, left: 20, right: 20, backgroundColor: '#f59e0b', padding: 15, borderRadius: 10, zIndex: 100 },
-  bodegaText: { color: 'white', fontWeight: 'bold', textAlign: 'center', fontSize: 13 }
+  center: { justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: '#cbd5e1', marginTop: 15 },
+  paddingH: { paddingHorizontal: 20 },
+  
+  header: { padding: 30, paddingTop: 60, paddingBottom: 20 },
+  headerGreeting: { color: '#94a3b8', fontSize: 16, textTransform: 'uppercase', letterSpacing: 1 },
+  headerVessel: { color: 'white', fontSize: 28, fontWeight: 'bold' },
+
+  semaforoCard: { padding: 25, borderRadius: 16, borderWidth: 2, alignItems: 'center', marginBottom: 20 },
+  semaforoText: { fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 5 },
+  semaforoSubtext: { color: '#cbd5e1', textAlign: 'center', fontSize: 14 },
+
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 },
+  statBox: { flex: 1, backgroundColor: '#1e293b', padding: 15, borderRadius: 12, alignItems: 'center', marginHorizontal: 4, borderWidth: 1, borderColor: '#334155' },
+  statNum: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
+  statLabel: { color: '#94a3b8', fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+
+  offlineCard: { backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#3b82f6', borderStyle: 'dashed' },
+  offlineHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  offlineTitle: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+  badge: { backgroundColor: '#3b82f6', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 2 },
+  badgeText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
+  offlineDesc: { color: '#94a3b8', fontSize: 14, marginBottom: 15 },
+  syncBtn: { backgroundColor: '#3b82f6', padding: 15, borderRadius: 10, alignItems: 'center' },
+  syncBtnText: { color: '#0f172a', fontWeight: '900', fontSize: 14 }
 });
