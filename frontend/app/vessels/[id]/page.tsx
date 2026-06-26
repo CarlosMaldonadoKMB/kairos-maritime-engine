@@ -51,7 +51,30 @@ export default function VesselDetail() {
       
       if (response.ok) {
         const data = await response.json();
-        setCertificates(data);
+        const hoy = new Date();
+        
+        // 🛰️ MOTOR NAVAL DE TIEMPO REAL: Recalcula los estados en vivo
+        const certificadosActualizados = data.map((cert: Certificate) => {
+          // Si el estado tiene el círculo azul 🔵, significa que está "En Trámite".
+          // Lo dejamos así porque es un estado manual que tú pusiste.
+          if (cert.status && cert.status.includes("🔵")) return cert;
+
+          const vencimiento = new Date(cert.expiry_date);
+          // Calculamos la diferencia en días exactos entre hoy y el vencimiento
+          const diferenciaDias = Math.ceil((vencimiento.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+
+          let estadoReal = "🟢 VIGENTE";
+          if (diferenciaDias < 0) {
+            estadoReal = "🔴 VENCIDO";
+          } else if (diferenciaDias <= 30) {
+            estadoReal = "🟡 POR VENCER";
+          }
+
+          // Devolvemos el certificado pero con el estado corregido al día de hoy
+          return { ...cert, status: estadoReal };
+        });
+
+        setCertificates(certificadosActualizados);
       }
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
