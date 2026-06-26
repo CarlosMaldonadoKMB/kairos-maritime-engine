@@ -158,13 +158,17 @@ app.post('/api/capitanes', verifyToken, verifyAdminOrHigher, async (req, res) =>
 // ==========================================
 // 🚢 OPERACIONES DE LA FLOTA (PROTEGIDAS MULTI-TENANT)
 // ==========================================
+// ==========================================
+// 🚢 OPERACIONES DE LA FLOTA (PROTEGIDAS MULTI-TENANT)
+// ==========================================
 app.get('/api/vessels', verifyToken, async (req, res) => {
   try {
+    // 🧠 MOTOR SQL DE TIEMPO REAL: Ahora cuenta basado en la FECHA, no en el texto guardado (salvo para Trámite)
     let query = `
       SELECT v.*,
-        COUNT(CASE WHEN c.status LIKE '%🟢%' THEN 1 END) as count_vigente,
-        COUNT(CASE WHEN c.status LIKE '%🟡%' THEN 1 END) as count_peligro,
-        COUNT(CASE WHEN c.status LIKE '%🔴%' THEN 1 END) as count_vencido,
+        COUNT(CASE WHEN c.status NOT LIKE '%🔵%' AND c.expiry_date > CURRENT_DATE + INTERVAL '30 days' THEN 1 END) as count_vigente,
+        COUNT(CASE WHEN c.status NOT LIKE '%🔵%' AND c.expiry_date >= CURRENT_DATE AND c.expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 1 END) as count_peligro,
+        COUNT(CASE WHEN c.status NOT LIKE '%🔵%' AND c.expiry_date < CURRENT_DATE THEN 1 END) as count_vencido,
         COUNT(CASE WHEN c.status LIKE '%🔵%' THEN 1 END) as count_tramite,
         COUNT(c.id) as total_certs
       FROM vessels v
